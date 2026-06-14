@@ -216,8 +216,12 @@ services:
     container_name: temporal
     restart: always
     image: temporalio/admin-tools:1.28.1-tctl-1.18.4-cli-1.4.1
+    # The admin-tools image's default entrypoint is `tini -- sleep infinity`, so
+    # a bare `command:` would be passed as args to sleep and Temporal would never
+    # start (container stays up but nothing listens on 7233 -> backend gets
+    # ECONNREFUSED). Override the entrypoint to actually run the dev server.
+    entrypoint: ["temporal"]
     command:
-      - temporal
       - server
       - start-dev
       - --ip
