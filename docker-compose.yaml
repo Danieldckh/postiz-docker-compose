@@ -4,6 +4,9 @@ services:
     container_name: postiz
     restart: always
     environment:
+      # === Coolify domain mapping (magic var): routes postiz.proagrihub.com -> this
+      # service's container port 5000 via Traefik and requests the Let's Encrypt cert.
+      SERVICE_FQDN_POSTIZ_5000: 'postiz.proagrihub.com'
       # === Required Settings
       MAIN_URL: 'https://postiz.proagrihub.com'
       FRONTEND_URL: 'https://postiz.proagrihub.com'
