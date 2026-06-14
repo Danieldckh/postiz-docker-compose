@@ -199,11 +199,36 @@ services:
       - postiz-network
 
   # -----------------------
-  # Temporal Stack
+  # Temporal Stack (upstream default: SQL + Elasticsearch advanced visibility).
+  # Kept ES enabled because temporalio/auto-setup crashes with ENABLE_ES=false
+  # while pointed at development-sql.yaml. Only the healthcheck start_periods are
+  # widened so the slower shared VPS doesn't time the stack out on first boot.
   # -----------------------
-  # NOTE: Elasticsearch visibility is DISABLED for this deployment to reduce memory
-  # pressure on the shared VPS and remove the ES startup race that made temporal
-  # unhealthy. Temporal uses postgres-only (standard SQL) visibility instead.
+  temporal-elasticsearch:
+    container_name: temporal-elasticsearch
+    image: elasticsearch:7.17.27
+    restart: always
+    environment:
+      - cluster.routing.allocation.disk.threshold_enabled=true
+      - cluster.routing.allocation.disk.watermark.low=512mb
+      - cluster.routing.allocation.disk.watermark.high=256mb
+      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - xpack.security.enabled=false
+    networks:
+      - temporal-network
+    expose:
+      - 9200
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS \"http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s\" || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 180s
+    volumes:
+      - temporal-elasticsearch-data:/usr/share/elasticsearch/data
+
   temporal-postgresql:
     container_name: temporal-postgresql
     image: postgres:16
@@ -233,6 +258,8 @@ services:
     depends_on:
       temporal-postgresql:
         condition: service_healthy
+      temporal-elasticsearch:
+        condition: service_healthy
     environment:
       - DB=postgres12
       - DB_PORT=5432
@@ -240,7 +267,9 @@ services:
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=temporal-postgresql
       - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
-      - ENABLE_ES=false
+      - ENABLE_ES=true
+      - ES_SEEDS=temporal-elasticsearch
+      - ES_VERSION=v7
       - TEMPORAL_NAMESPACE=default
     networks:
       - temporal-network
@@ -272,6 +301,9 @@ volumes:
     external: false
 
   temporal-postgres-data:
+    external: false
+
+  temporal-elasticsearch-data:
     external: false
 
 networks:
