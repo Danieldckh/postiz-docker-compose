@@ -151,7 +151,7 @@ services:
       postiz-redis:
         condition: service_healthy
       temporal:
-        condition: service_started
+        condition: service_healthy
 
   postiz-postgres:
     image: postgres:17-alpine
@@ -199,88 +199,43 @@ services:
       - postiz-network
 
   # -----------------------
-  # Temporal Stack (upstream default: SQL + Elasticsearch advanced visibility).
-  # Kept ES enabled because temporalio/auto-setup crashes with ENABLE_ES=false
-  # while pointed at development-sql.yaml. Only the healthcheck start_periods are
-  # widened so the slower shared VPS doesn't time the stack out on first boot.
-  # -----------------------
-  temporal-elasticsearch:
-    container_name: temporal-elasticsearch
-    image: elasticsearch:7.17.27
-    restart: always
-    environment:
-      - cluster.routing.allocation.disk.threshold_enabled=true
-      - cluster.routing.allocation.disk.watermark.low=512mb
-      - cluster.routing.allocation.disk.watermark.high=256mb
-      - cluster.routing.allocation.disk.watermark.flood_stage=128mb
-      - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms256m -Xmx256m
-      - xpack.security.enabled=false
-    networks:
-      - temporal-network
-    expose:
-      - 9200
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS \"http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s\" || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 180s
-    volumes:
-      - temporal-elasticsearch-data:/usr/share/elasticsearch/data
-
-  temporal-postgresql:
-    container_name: temporal-postgresql
-    image: postgres:16
-    restart: always
-    environment:
-      POSTGRES_PASSWORD: temporal
-      POSTGRES_USER: temporal
-    networks:
-      - temporal-network
-    expose:
-      - 5432
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    volumes:
-      - temporal-postgres-data:/var/lib/postgresql/data
-
+  # Temporal (lightweight dev server).
+  # The full auto-setup + Postgres + Elasticsearch stack crash-looped on this
+  # shared VPS (auto-setup entered Error during first-run schema setup, which
+  # both aborted `docker compose up --wait` and left temporal's hostname
+  # unresolvable so the postiz backend died with "Name resolution failed for
+  # dns:temporal:7233"). Replace it with the single-container `temporal server
+  # start-dev`: no schema setup, no ES, no separate DB — it auto-creates the
+  # `default` namespace and serves the gRPC frontend on 7233, which is all
+  # Postiz needs. State is persisted to a volume so restarts keep workflows.
   temporal:
     container_name: temporal
     restart: always
+    image: temporalio/admin-tools:1.28.1-tctl-1.18.4-cli-1.4.1
+    command:
+      - temporal
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --namespace
+      - default
+      - --db-filename
+      - /home/temporal/temporal.db
+      - --log-format
+      - pretty
     expose:
       - '7233'
-    image: temporalio/auto-setup:1.28.1
-    depends_on:
-      temporal-postgresql:
-        condition: service_healthy
-      temporal-elasticsearch:
-        condition: service_healthy
-    environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=temporal
-      - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=temporal-postgresql
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
-      - ENABLE_ES=true
-      - ES_SEEDS=temporal-elasticsearch
-      - ES_VERSION=v7
-      - TEMPORAL_NAMESPACE=default
     networks:
       - temporal-network
-    # No healthcheck gate: temporalio/auto-setup briefly enters an Error/restart
-    # state during first-run schema setup which would abort `docker compose up
-    # --wait`. With restart: always it stabilizes; the postiz backend retries the
-    # temporal connection until it is reachable.
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "namespace", "describe", "--namespace", "default", "--address", "temporal:7233"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
     volumes:
-      - ./dynamicconfig:/etc/temporal/config/dynamicconfig
-    labels:
-      kompose.volume.type: configMap
+      - temporal-devserver-data:/home/temporal
 
   # temporal-admin-tools and temporal-ui removed: operator conveniences not needed
   # by Postiz, and they gated on temporal being healthy. Dropping them frees memory.
@@ -298,10 +253,7 @@ volumes:
   postiz-uploads:
     external: false
 
-  temporal-postgres-data:
-    external: false
-
-  temporal-elasticsearch-data:
+  temporal-devserver-data:
     external: false
 
 networks:
