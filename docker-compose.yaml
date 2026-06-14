@@ -119,6 +119,26 @@ services:
     networks:
       - postiz-network
       - temporal-network
+      - coolify
+    labels:
+      # Traefik routing for postiz.proagrihub.com -> this service on port 5000.
+      # Kept in the compose (not Coolify's docker_compose_domains) because a
+      # git-sourced redeploy re-parses the compose and resets that DB field.
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.gzip.compress=true
+      - "traefik.http.routers.postiz-http.rule=Host(`postiz.proagrihub.com`) && PathPrefix(`/`)"
+      - traefik.http.routers.postiz-http.entryPoints=http
+      - traefik.http.routers.postiz-http.middlewares=redirect-to-https
+      - traefik.http.routers.postiz-http.service=postiz-svc
+      - "traefik.http.routers.postiz-https.rule=Host(`postiz.proagrihub.com`) && PathPrefix(`/`)"
+      - traefik.http.routers.postiz-https.entryPoints=https
+      - traefik.http.routers.postiz-https.middlewares=gzip
+      - traefik.http.routers.postiz-https.tls=true
+      - traefik.http.routers.postiz-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.postiz-https.service=postiz-svc
+      - traefik.http.services.postiz-svc.loadbalancer.server.port=5000
     healthcheck:
       test: ["CMD", "node", "-e", "const r=require('http').get('http://localhost:5000/',res=>process.exit(res.statusCode<500?0:1));r.on('error',()=>process.exit(1));r.setTimeout(4000,()=>{r.destroy();process.exit(1)})"]
       interval: 30s
@@ -254,3 +274,7 @@ networks:
   temporal-network:
     driver: bridge
     name: temporal-network
+  # Coolify's shared Traefik ingress network (created by Coolify) so the proxy
+  # can reach the postiz container for the postiz.proagrihub.com router.
+  coolify:
+    external: true
