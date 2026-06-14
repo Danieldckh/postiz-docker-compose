@@ -207,7 +207,11 @@ services:
   # dns:temporal:7233"). Replace it with the single-container `temporal server
   # start-dev`: no schema setup, no ES, no separate DB — it auto-creates the
   # `default` namespace and serves the gRPC frontend on 7233, which is all
-  # Postiz needs. State is persisted to a volume so restarts keep workflows.
+  # Postiz needs. Uses the in-memory store (no volume): a named volume is
+  # created root-owned and the dev server runs as a non-root user, so writing a
+  # SQLite db there fails and the container produces no listener (ECONNREFUSED
+  # on 7233). In-memory avoids the permission problem; Postiz re-registers its
+  # workflows/schedules on boot, so durability across restarts isn't required.
   temporal:
     container_name: temporal
     restart: always
@@ -220,20 +224,14 @@ services:
       - 0.0.0.0
       - --namespace
       - default
-      - --db-filename
-      - /home/temporal/temporal.db
       - --log-format
       - pretty
     expose:
       - '7233'
     networks:
       - temporal-network
-    # No healthcheck gate: the dev server starts cleanly and stays up (unlike
-    # auto-setup), and the Compose healthcheck CLI did not reliably report
-    # healthy in time. postiz depends on temporal: service_started and the
+    # No healthcheck gate: postiz depends on temporal: service_started and the
     # backend retries the temporal connection until the frontend is serving.
-    volumes:
-      - temporal-devserver-data:/home/temporal
 
   # temporal-admin-tools and temporal-ui removed: operator conveniences not needed
   # by Postiz, and they gated on temporal being healthy. Dropping them frees memory.
@@ -249,9 +247,6 @@ volumes:
     external: false
 
   postiz-uploads:
-    external: false
-
-  temporal-devserver-data:
     external: false
 
 networks:
