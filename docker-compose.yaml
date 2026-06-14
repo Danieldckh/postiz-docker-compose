@@ -16,7 +16,8 @@ services:
       BACKEND_INTERNAL_URL: 'http://localhost:3000'
       TEMPORAL_ADDRESS: "temporal:7233"
       IS_GENERAL: 'true'
-      DISABLE_REGISTRATION: 'false'
+      # Locked down after the admin account was created (single-admin instance).
+      DISABLE_REGISTRATION: 'true'
       RUN_CRON: 'true'
 
       # === Storage Settings
